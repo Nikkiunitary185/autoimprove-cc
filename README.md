@@ -1,138 +1,202 @@
 # autoimprove-cc
 
-Karpathy autoresearch 루프를 CLAUDE.md에 적용하는 Claude Code 전용 자동개선 시스템.
+> Karpathy autoresearch loop for SKILL.md — Claude Code native implementation.
 
-어떤 Claude Code 프로젝트의 `CLAUDE.md`도 자동으로 분석하고, assertions를 생성하고, 반복적으로 개선합니다.
+SKILL.md를 밤새 자동 개선하는 Claude Code 네이티브 시스템.
+`/autoimprove` 한 줄로 실행하면, 아침에 더 나은 스킬로 깨어납니다.
+
+Python 스크립트 없이 **Claude Code agents + commands**만으로 동작합니다.
+
+## How It Works
+
+[Karpathy의 autoresearch](https://github.com/karpathy/autoresearch) 루프를 SKILL.md에 적용합니다:
+
+```
+1. SKILL.md 읽기
+2. eval.json의 binary assertions로 채점
+3. 실패한 assertion 하나를 고치도록 SKILL.md 수정
+4. 재채점 → 점수 올랐으면 git commit, 아니면 git reset
+5. 100% 달성하거나 max_loops까지 반복
+```
+
+핵심 차이: Karpathy는 `train.py`의 수치 메트릭을 사용하지만,
+우리는 **binary assertions**(참/거짓 테스트)의 패스율을 메트릭으로 사용합니다.
+
+## Quick Start
+
+### 글로벌 설치 (모든 Claude Code 프로젝트에서 사용)
+
+```bash
+# 이 저장소를 클론
+git clone https://github.com/VoidLight00/autoimprove-cc.git
+
+# Claude Code 글로벌 agents/commands에 심볼릭 링크
+ln -s $(pwd)/autoimprove-cc/.claude/agents/skill-optimizer.md ~/.claude/agents/skill-optimizer.md
+ln -s $(pwd)/autoimprove-cc/.claude/commands/autoimprove.md ~/.claude/commands/autoimprove.md
+```
+
+### 프로젝트별 설치
+
+```bash
+# 프로젝트 디렉토리에서
+cp -r autoimprove-cc/.claude/agents/skill-optimizer.md .claude/agents/
+cp -r autoimprove-cc/.claude/commands/autoimprove.md .claude/commands/
+```
+
+### 실행
+
+```bash
+# Claude Code 세션에서:
+
+# 1. eval.json 자동 생성 + 루프 실행
+/autoimprove skills/my-skill
+
+# 2. eval.json만 생성 (검토 후 수동 실행)
+/autoimprove skills/my-skill --gen-eval-only
+
+# 3. 최대 50회 반복
+/autoimprove skills/my-skill --max-loops 50
+
+# 4. Dry-run (git 변경 없이 채점만)
+/autoimprove skills/my-skill --dry-run
+```
+
+## eval.json 작성법
+
+eval.json은 SKILL.md의 품질을 측정하는 **binary assertions** 모음입니다.
+
+### 구조
+
+```json
+{
+  "skill_name": "my-skill",
+  "skill_md_path": "skills/my-skill/SKILL.md",
+  "tests": [
+    {
+      "id": "test-001",
+      "description": "구조 — 필수 섹션 존재 여부",
+      "prompt": "/my-skill 이라고 입력했을 때",
+      "expected_behavior": "스킬이 활성화되고 워크플로우를 시작한다",
+      "assertions": [
+        "SKILL.md에 스킬 이름이 포함된 H1 헤딩이 있다",
+        "Workflow 섹션이 존재한다",
+        "Rules 섹션에 최소 2개의 금지 사항이 있다"
+      ]
+    }
+  ]
+}
+```
+
+### 필드 설명
+
+| 필드 | 설명 |
+|------|------|
+| `id` | `test-001` 형식의 고유 ID |
+| `description` | 테스트 그룹 설명 |
+| `prompt` | 사용자가 입력할 프롬프트 시나리오 |
+| `expected_behavior` | 프롬프트에 대한 기대 동작 |
+| `assertions` | 참/거짓으로 판별 가능한 assertion 배열 |
+
+### 좋은 assertion 작성 팁
+
+```
+# 좋은 assertion (명확한 참/거짓)
+"SKILL.md에 '## Workflow' 섹션이 존재한다"
+"워크플로우에 최소 5개의 단계가 있다"
+"코드 블록이 최소 2개 포함되어 있다"
+
+# 나쁜 assertion (주관적, 판단 불가)
+"SKILL.md가 잘 작성되어 있다"
+"워크플로우가 충분히 상세하다"
+```
+
+### 권장 카테고리 (5개)
+
+1. **구조** — 필수 섹션 존재, 헤딩 계층, 파일 구조
+2. **트리거** — 슬래시 커맨드, 활성화 조건, 인자 형식
+3. **워크플로우** — 단계별 프로세스, 분기 조건, 출력 형식
+4. **규칙** — 금지 사항, 제약 조건, Do NOT 항목
+5. **완성도** — 예시, 코드블록, 에지 케이스, 의존성
+
+eval.json이 없으면 `/autoimprove`가 SKILL.md를 분석하여 자동 생성합니다.
+생성 후 검토하고 필요시 수정하세요.
+
+## Architecture
+
+```
+autoimprove-cc/
+├── README.md                     ← 이 파일
+├── CLAUDE.md                     ← Claude Code 프로젝트 지시문
+├── .claude/
+│   ├── agents/
+│   │   └── skill-optimizer.md    ← 루프 에이전트 (핵심)
+│   └── commands/
+│       └── autoimprove.md        ← /autoimprove 슬래시 커맨드
+├── eval/
+│   ├── schema.json               ← eval.json JSON Schema
+│   └── examples/
+│       ├── example-skill-eval.json
+│       └── comet-agent-eval.json
+├── skills/
+│   └── example-skill/            ← 테스트용 예시 스킬
+│       ├── SKILL.md
+│       └── eval/
+│           └── eval.json
+└── LICENSE
+```
+
+### 타겟 스킬 디렉토리 구조 (루프 실행 후)
+
+```
+skills/my-skill/
+├── SKILL.md              ← 개선 대상
+└── eval/
+    ├── eval.json          ← assertions 정의
+    └── improve-log.md     ← 개선 이력 로그
+```
 
 ## OpenClaw 버전과의 차이
 
 | | skill-autoimprove (OpenClaw) | **autoimprove-cc** (Claude Code) |
 |---|---|---|
-| 타겟 | `~/.openclaw/skills/*/SKILL.md` | **어떤 프로젝트의 `CLAUDE.md`도 가능** |
-| 진입점 | `/autoimprove` 스킬 트리거 | `python scripts/*.py --target <path>` |
-| LLM 호출 | `claude -p` | `claude --permission-mode bypassPermissions --print` |
-| eval 저장 | `skills/<name>/eval/eval.json` | `<target>/.autoimprove/eval.json` |
-| 의존성 | OpenClaw 필수 | **없음** (Python 3.10+ only) |
+| 아키텍처 | Python 스크립트 4개 | **Claude Code agent + command** |
+| 진입점 | `python scripts/run-loop.py` | **`/autoimprove` 슬래시 커맨드** |
+| 타겟 | CLAUDE.md | **SKILL.md** |
+| LLM 호출 | `claude -p` subprocess | **Claude Code 에이전트 내장** |
+| 채점 | 별도 Python 프로세스 | **에이전트가 직접 판정** |
+| 의존성 | Python 3.10+ | **없음 (Claude Code만 필요)** |
+| eval 저장 | `<target>/.autoimprove/eval.json` | **`<skill>/eval/eval.json`** |
+| 이력 로그 | `history.jsonl` (JSON Lines) | **`improve-log.md` (Markdown)** |
+| 설정 파일 | `autoimprove.config.json` | **에이전트 MD에 내장** |
 
-## Quick Start
+## Karpathy autoresearch란?
 
-```bash
-# 1. eval.json 생성 — CLAUDE.md를 분석해 assertions 자동 생성
-python scripts/gen-eval.py --target /path/to/your/project
-
-# 2. 현재 점수 확인
-python scripts/run-assertions.py --target /path/to/your/project
-
-# 3. 자율 개선 루프 실행
-python scripts/run-loop.py --target /path/to/your/project --max-iter 20
-
-# 4. 리포트 확인
-python scripts/report.py --target /path/to/your/project
-```
-
-## --target 플래그
-
-모든 스크립트에서 `--target` (또는 `-t`)로 프로젝트 경로를 지정합니다.
-
-```bash
-# 디렉토리 지정 — 내부의 CLAUDE.md를 자동 탐지
-python scripts/gen-eval.py --target ~/projects/my-app
-
-# CLAUDE.md 직접 지정도 가능
-python scripts/gen-eval.py --target ~/projects/my-app/CLAUDE.md
-```
-
-## 작동 원리
+[Andrej Karpathy의 autoresearch](https://github.com/karpathy/autoresearch)는
+AI 모델이 스스로 코드를 수정하고, 벤치마크를 실행하고, 개선되면 커밋하는 자율 연구 루프입니다.
 
 ```
-1. CLAUDE.md 읽기
-2. eval.json의 binary assertions 실행 (LLM 판단)
-3. 점수 계산 (pass 수 / 전체 수)
-4. 점수 개선 → git commit
-   점수 동일/하락 → git reset (롤백)
-5. 반복
+Original (Karpathy):     Our adaptation:
+━━━━━━━━━━━━━━━━━━━━     ━━━━━━━━━━━━━━━━━━━━
+train.py          →      SKILL.md
+numeric metrics   →      binary assertions (pass rate)
+git commit/reset  →      git commit/reset (동일)
+"never stop"      →      "never stop" (동일)
 ```
 
-## Assertions 유형 (Claude Code 특화)
+핵심 인사이트: 스킬 품질도 수치화할 수 있다면 자동 최적화가 가능합니다.
+Binary assertions는 그 수치화 방법입니다.
 
-| 카테고리 | 검증 대상 |
-|----------|-----------|
-| **구조** | Architecture/파일구조 섹션, 헤딩 계층 |
-| **규칙** | Do NOT / 코딩 규칙 섹션, 금지 패턴 |
-| **진입점** | 프로젝트 개요/목적 명확성 |
-| **명령어** | CLI 명령어 예시, 코드 블록 |
-| **완성도** | 파일 경로 명시, 예시 코드, 의존성 |
+## Requirements
 
-## 파일 구조
-
-```
-autoimprove-cc/
-├── CLAUDE.md                  Claude Code 진입점
-├── README.md                  이 파일
-├── autoimprove.config.json    설정
-├── scripts/
-│   ├── gen-eval.py            CLAUDE.md 분석 → eval.json 생성
-│   ├── run-assertions.py      eval.json → 채점 → results.json
-│   ├── run-loop.py            Karpathy 루프 (commit/reset)
-│   └── report.py              개선 이력 리포트
-└── templates/
-    └── eval-template.json     eval.json 기본 템플릿
-```
-
-타겟 프로젝트에 생성되는 파일:
-
-```
-<target-project>/
-├── CLAUDE.md                  개선 대상
-└── .autoimprove/
-    ├── eval.json              assertions 정의
-    ├── results.json           최근 채점 결과
-    ├── history.jsonl          루프 이력 (JSONL)
-    └── report.txt             최종 리포트
-```
-
-## 설정 (autoimprove.config.json)
-
-| 키 | 기본값 | 설명 |
-|----|--------|------|
-| `max_iterations` | `20` | 루프 최대 반복 횟수 |
-| `timeout_seconds` | `3600` | 루프 타임아웃 (초) |
-| `llm_command` | `claude --permission-mode bypassPermissions --print` | LLM 호출 명령어 |
-| `git_auto_commit` | `true` | 개선 시 자동 커밋 |
-| `eval_dir` | `.autoimprove` | eval.json 저장 디렉토리 |
-| `eval_filename` | `eval.json` | eval 파일명 |
-| `assertions_per_test` | `5` | 테스트 그룹당 assertion 수 |
-| `total_tests_target` | `5` | 테스트 그룹 수 |
-
-## 사용 시나리오
-
-### 새 프로젝트의 CLAUDE.md 품질 점검
-
-```bash
-python scripts/gen-eval.py --target ~/projects/new-app
-python scripts/run-assertions.py --target ~/projects/new-app
-# → 현재 점수와 실패한 항목 확인
-```
-
-### 밤새 자동 개선
-
-```bash
-python scripts/run-loop.py --target ~/projects/my-app --max-iter 50 --timeout 7200
-# → 아침에 개선된 CLAUDE.md + 리포트 확인
-```
-
-### Dry-run (git 변경 없이 테스트)
-
-```bash
-python scripts/run-loop.py --target ~/projects/my-app --dry-run
-```
-
-## 요구사항
-
-- Python 3.10+
 - Claude Code CLI (`claude` 명령어)
-- 타겟 프로젝트가 git 저장소일 것 (롤백 기능에 필요)
+- 타겟 스킬이 git 저장소 내부일 것 (롤백 기능에 필요)
+
+Python, Node.js 등 외부 런타임 불필요.
+
+## License
+
+MIT
 
 ---
 
-*Maintained by Hyeon · Powered by Kraken*
+*Maintained by Hyeon &middot; Powered by Kraken*
